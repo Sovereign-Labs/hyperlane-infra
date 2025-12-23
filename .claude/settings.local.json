@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "Bash(AWS_PROFILE=590183691025_AdministratorAccess aws cloudformation:*)",
+      "Bash(AWS_PROFILE=590183691025_AdministratorAccess aws ecs list-tasks:*)",
+      "Bash(AWS_PROFILE=590183691025_AdministratorAccess aws ecs describe-tasks:*)",
+      "Bash(AWS_PROFILE=590183691025_AdministratorAccess aws ecs:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
