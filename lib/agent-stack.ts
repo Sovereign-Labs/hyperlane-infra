@@ -96,6 +96,7 @@ export class AgentStack extends cdk.Stack {
       cdk.Fn.importValue(`Hyperlane-${accountName}-PrivateSubnetIds`),
     );
 
+    // Import VPC Cluster from BaseAccountStack
     this.vpc = ec2.Vpc.fromVpcAttributes(this, "Vpc", {
       vpcId,
       availabilityZones,
@@ -167,8 +168,7 @@ export class AgentStack extends cdk.Stack {
     const bucket = s3.Bucket.fromBucketArn(this, "SignaturesBucket", bucketArn);
 
     // Grant S3 permissions (works for both same-account and cross-account)
-    // For cross-account, this adds IAM policies on the task role
-    // The bucket policy in the main account allows the access
+    // Only validator needs write access
     bucket.grantRead(this.taskRole);
     if (agentType === AgentType.Validator) {
       bucket.grantWrite(this.taskRole);
@@ -192,22 +192,22 @@ export class AgentStack extends cdk.Stack {
       name: "agent-data",
       efsVolumeConfiguration: {
         fileSystemId: this.fileSystem.fileSystemId,
-        rootDirectory: `/${uniqueId}`,
       },
     });
 
-    const baseEnvironment = props.environment || {};
-
     // Add HYP_DB path for all agents
     const environment: { [key: string]: string } = {
-      ...baseEnvironment,
+      ...(props.environment ?? {}),
       HYP_DB: `/data/${uniqueId}/db`,
+      // TODO: rest of fields
     };
 
     // Add KMS key alias for validators
     if (agentType === AgentType.Validator) {
       environment.HYP_VALIDATOR_TYPE = "aws";
       environment.HYP_VALIDATOR_ID = `alias/hyperlane-validator-${uniqueId}`;
+
+      // TODO: s3 bucket
     }
 
     const containerConfig: ecs.ContainerDefinitionOptions = {
@@ -247,7 +247,6 @@ export class AgentStack extends cdk.Stack {
       readOnly: false,
     });
 
-    // Create Fargate service
     this.service = new ecs.FargateService(this, "Service", {
       cluster: this.cluster,
       taskDefinition,
@@ -256,9 +255,6 @@ export class AgentStack extends cdk.Stack {
       enableExecuteCommand: true,
     });
 
-    this.fileSystem.grantRootAccess(
-      this.service.taskDefinition.taskRole.grantPrincipal,
-    );
     this.fileSystem.connections.allowDefaultPortFrom(this.service.connections);
 
     new cdk.CfnOutput(this, "ClusterName", {

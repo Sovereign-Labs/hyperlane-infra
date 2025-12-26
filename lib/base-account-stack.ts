@@ -30,12 +30,6 @@ export interface BaseAccountStackProps extends cdk.StackProps {
    * Default: false
    */
   enableVpcEndpoints?: boolean;
-
-  /**
-   * Create shared EFS file system for agents in this account
-   * Default: true
-   */
-  createEfs?: boolean;
 }
 
 /**
@@ -144,65 +138,41 @@ export class BaseAccountStack extends cdk.Stack {
     // EFS File System (shared storage for all agents)
     // ========================================================================
 
-    if (props.createEfs !== false) {
-      // Security group for EFS
-      this.efsSecurityGroup = new ec2.SecurityGroup(this, "EfsSecurityGroup", {
-        vpc: this.vpc,
-        securityGroupName: `hyperlane-${accountName}-efs-sg`,
-        description: `Security group for Hyperlane EFS in ${accountName}`,
-        allowAllOutbound: false, // EFS doesn't need outbound
-      });
+    // manually created so we can export it and use in other stacks
+    this.efsSecurityGroup = new ec2.SecurityGroup(this, "EfsSecurityGroup", {
+      vpc: this.vpc,
+      securityGroupName: `hyperlane-${accountName}-efs-sg`,
+      description: `Security group for Hyperlane EFS in ${accountName}`,
+    });
 
-      // Allow NFS traffic from within the VPC
-      this.efsSecurityGroup.addIngressRule(
-        ec2.Peer.ipv4(this.vpc.vpcCidrBlock),
-        ec2.Port.NFS,
-        "Allow NFS from VPC",
-      );
+    this.fileSystem = new efs.FileSystem(this, "FileSystem", {
+      vpc: this.vpc,
+      fileSystemName: `hyperlane-${accountName}-efs`,
+      lifecyclePolicy: efs.LifecyclePolicy.AFTER_7_DAYS,
+      performanceMode: efs.PerformanceMode.GENERAL_PURPOSE,
+      throughputMode: efs.ThroughputMode.BURSTING,
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+    });
 
-      this.fileSystem = new efs.FileSystem(this, "FileSystem", {
-        vpc: this.vpc,
-        fileSystemName: `hyperlane-${accountName}-efs`,
-        securityGroup: this.efsSecurityGroup,
-        lifecyclePolicy: efs.LifecyclePolicy.AFTER_7_DAYS,
-        performanceMode: efs.PerformanceMode.GENERAL_PURPOSE,
-        throughputMode: efs.ThroughputMode.BURSTING,
-        removalPolicy: cdk.RemovalPolicy.DESTROY,
-      });
-
-      // Add file system policy to allow mounting from any task in the VPC
-      // Can probably use IAM assumed role conditions here, but this is simpler
-      // and effective enough for our use case
-      this.fileSystem.addToResourcePolicy(
-        new iam.PolicyStatement({
-          effect: iam.Effect.ALLOW,
-          principals: [new iam.AnyPrincipal()],
-          actions: [
-            "elasticfilesystem:ClientMount",
-            "elasticfilesystem:ClientRootAccess",
-            "elasticfilesystem:ClientWrite",
-          ],
-          conditions: {
-            Bool: {
-              "elasticfilesystem:AccessedViaMountTarget": "true",
-            },
+    // Add file system policy to allow mounting from any task in the VPC
+    // Can probably use IAM assumed role controls here, but this is simpler
+    // and effective enough for our use case
+    this.fileSystem.addToResourcePolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        principals: [new iam.AnyPrincipal()],
+        actions: [
+          "elasticfilesystem:ClientMount",
+          "elasticfilesystem:ClientRootAccess",
+          "elasticfilesystem:ClientWrite",
+        ],
+        conditions: {
+          Bool: {
+            "elasticfilesystem:AccessedViaMountTarget": "true",
           },
-        }),
-      );
-
-      // Export EFS details
-      new cdk.CfnOutput(this, "EfsId", {
-        value: this.fileSystem.fileSystemId,
-        description: `Shared EFS file system ID for ${accountName}`,
-        exportName: `Hyperlane-${accountName}-EfsId`,
-      });
-
-      new cdk.CfnOutput(this, "EfsSecurityGroupId", {
-        value: this.efsSecurityGroup.securityGroupId,
-        description: `EFS security group ID for ${accountName}`,
-        exportName: `Hyperlane-${accountName}-EfsSecurityGroupId`,
-      });
-    }
+        },
+      }),
+    );
 
     // ========================================================================
     // CloudFormation Exports
@@ -243,6 +213,19 @@ export class BaseAccountStack extends cdk.Stack {
       ),
       description: `Public subnet IDs for ${accountName}`,
       exportName: `Hyperlane-${accountName}-PublicSubnetIds`,
+    });
+
+    // Export EFS details
+    new cdk.CfnOutput(this, "EfsId", {
+      value: this.fileSystem.fileSystemId,
+      description: `Shared EFS file system ID for ${accountName}`,
+      exportName: `Hyperlane-${accountName}-EfsId`,
+    });
+
+    new cdk.CfnOutput(this, "EfsSecurityGroupId", {
+      value: this.efsSecurityGroup.securityGroupId,
+      description: `EFS security group ID for ${accountName}`,
+      exportName: `Hyperlane-${accountName}-EfsSecurityGroupId`,
     });
 
     // ECS Cluster exports

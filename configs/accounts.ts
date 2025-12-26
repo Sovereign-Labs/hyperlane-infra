@@ -8,6 +8,7 @@ export type Account = {
 };
 
 export enum NetworkType {
+  Devnet = "devnet",
   Testnet = "testnet",
   Mainnet = "mainnet",
 }
@@ -20,7 +21,7 @@ export const CORE_ACCOUNTS: Account[] = [
   {
     name: "Ross",
     id: "590183691025",
-    network: NetworkType.Testnet,
+    network: NetworkType.Devnet,
     customer: "sovereign",
   },
 ];
@@ -39,6 +40,8 @@ export function getNetworkType(account: Account): NetworkType {
   const lowerName = account.name.toLowerCase().split("-")[1];
 
   switch (lowerName) {
+    case "devnet":
+      return NetworkType.Devnet;
     case "testnet":
       return NetworkType.Testnet;
     case "mainnet":

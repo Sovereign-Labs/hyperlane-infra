@@ -12,12 +12,13 @@ import {
 
 const app = new cdk.App();
 
+const STACK_PREFIX = "Hyperlane";
 const region = process.env.AWS_REGION || "us-east-1";
 
 for (const account of HYPERLANE_ACCOUNTS) {
   // Deploy base infrastructure to each account
   // Includes VPC, ECS Cluster, EFS, etc used by all hyperlane agents in this account
-  new BaseAccountStack(app, `BaseInfra-${account.name}`, {
+  new BaseAccountStack(app, `${STACK_PREFIX}-BaseInfra-${account.name}`, {
     env: {
       account: account.id,
       region,
@@ -26,7 +27,6 @@ for (const account of HYPERLANE_ACCOUNTS) {
     maxAzs: 2,
     natGateways: 1,
     enableVpcEndpoints: true,
-    createEfs: true,
   });
 
   // Deploy ECR/S3 to core account
@@ -37,7 +37,7 @@ for (const account of HYPERLANE_ACCOUNTS) {
       .filter((a) => a.id !== account.id)
       .map((a) => a.id);
 
-    new StorageStack(app, `StorageStack-${account.name}`, {
+    new StorageStack(app, `${STACK_PREFIX}-StorageStack-${account.name}`, {
       env: {
         account: account.id,
         region,
