@@ -6,6 +6,7 @@ import * as logs from "aws-cdk-lib/aws-logs";
 import * as s3 from "aws-cdk-lib/aws-s3";
 import * as efs from "aws-cdk-lib/aws-efs";
 import * as kms from "aws-cdk-lib/aws-kms";
+import * as secretsmanager from "aws-cdk-lib/aws-secretsmanager";
 import { Construct } from "constructs";
 import { CF_PREFIX } from "./constants";
 
@@ -84,7 +85,9 @@ export class AgentStack extends cdk.Stack {
 
     // Import EFS from BaseAccountStack
     const efsId = cdk.Fn.importValue(`${CF_PREFIX}-EfsId`);
-    const efsSecurityGroupId = cdk.Fn.importValue(`${CF_PREFIX}-EfsSecurityGroupId`);
+    const efsSecurityGroupId = cdk.Fn.importValue(
+      `${CF_PREFIX}-EfsSecurityGroupId`,
+    );
 
     this.fileSystem = efs.FileSystem.fromFileSystemAttributes(
       this,
@@ -196,11 +199,6 @@ export class AgentStack extends cdk.Stack {
       // TODO: s3 bucket
     }
 
-    if (agentType === AgentType.Relayer) {
-      // import required wallet keys (determine chains from env HYP_RELAYCHAINS) from secrets manager
-      // set in env vars
-    }
-
     const containerConfig: ecs.ContainerDefinitionOptions = {
       image: ecs.ContainerImage.fromRegistry(ecrRepositoryUri),
       logging: ecs.LogDrivers.awsLogs({
@@ -231,6 +229,23 @@ export class AgentStack extends cdk.Stack {
       containerPath: dbPath,
       readOnly: false,
     });
+
+    // Inject wallet signer keys from secrets manager
+    // Only access the keys the relayer is relaying
+    if (agentType === AgentType.Relayer) {
+      // This env var should always exist for relayers
+      const chains = environment["HYP_RELAYCHAINS"].split(",");
+
+      for (const chain of chains) {
+        const envVar = `HYP_CHAINS_${chain.toUpperCase()}_SIGNER_KEY`;
+        const secret = secretsmanager.Secret.fromSecretNameV2(
+          this,
+          `SignerKeySecret-${chain}`,
+          `hyperlane/${chain}-wallet`,
+        );
+        container.addSecret(envVar, ecs.Secret.fromSecretsManager(secret));
+      }
+    }
 
     this.service = new ecs.FargateService(this, "Service", {
       cluster: this.cluster,
