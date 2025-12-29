@@ -7,6 +7,7 @@ import * as s3 from "aws-cdk-lib/aws-s3";
 import * as efs from "aws-cdk-lib/aws-efs";
 import * as kms from "aws-cdk-lib/aws-kms";
 import { Construct } from "constructs";
+import { CF_PREFIX } from "./constants";
 
 export enum AgentType {
   Relayer = "relayer",
@@ -14,21 +15,6 @@ export enum AgentType {
 }
 
 export interface AgentStackProps extends cdk.StackProps {
-  /**
-   * Account name for auto-discovery of base infrastructure
-   * Must match the accountName used in BaseAccountStack
-   * Example: "validator1", "validator2", "sovereign-testnet"
-   */
-  accountName: string;
-
-  /**
-   * Core account name for cross-account access (ECR/S3)
-   * Only required if this agent is deployed in a different account than storage
-   * If not provided, assumes same-account deployment (accountName has the storage)
-   * Example: "sovereign-testnet" when deploying to "customer1-testnet"
-   */
-  coreAccountName?: string;
-
   /** A unique identifier for the agent (e.g., "validator-evm-1", "relayer-cosmos") */
   uniqueId: string;
 
@@ -36,29 +22,22 @@ export interface AgentStackProps extends cdk.StackProps {
   agentType: AgentType;
 
   /**
+   * ECR repository URI for the agent container image
+   * Example: "123456789012.dkr.ecr.us-east-1.amazonaws.com/hyperlane-agents"
+   */
+  ecrRepositoryUri: string;
+
+  /**
+   * S3 bucket ARN for validator signatures
+   * Example: "arn:aws:s3:::hyperlane-signatures"
+   */
+  bucketArn: string;
+
+  /**
    * Environment variables for the agent container
-   * Example: { HYP_CHAINS: 'ethereum,polygon', HYP_DB: '/data/relayer-1/db' }
+   * Example (for relayer): { HYP_RELAYCHAINS: 'ethtest,sovstarter' }
    */
   environment?: { [key: string]: string };
-
-  /**
-   * CPU units for the Fargate task (256, 512, 1024, 2048, 4096)
-   * Default: 512 (0.5 vCPU)
-   */
-  cpu?: number;
-
-  /**
-   * Memory in MB for the Fargate task (512, 1024, 2048, 3072, 4096, etc.)
-   * Must be compatible with CPU value
-   * Default: 1024 (1 GB)
-   */
-  memory?: number;
-
-  /**
-   * Number of agent tasks to run
-   * Default: 1
-   */
-  desiredCount?: number;
 }
 
 export class AgentStack extends cdk.Stack {
@@ -72,28 +51,17 @@ export class AgentStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: AgentStackProps) {
     super(scope, id, props);
 
-    const { uniqueId, accountName, agentType } = props;
-
-    // Determine which account has the storage (ECR/S3)
-    const storageAccountName = props.coreAccountName || accountName;
-
-    // Auto-discover ECR repository URI and S3 bucket ARN from CloudFormation exports
-    const ecrRepositoryUri = cdk.Fn.importValue(
-      `Hyperlane-${storageAccountName}-RepositoryUri`,
-    );
-    const bucketArn = cdk.Fn.importValue(
-      `Hyperlane-${storageAccountName}-BucketArn`,
-    );
+    const { uniqueId, agentType, ecrRepositoryUri, bucketArn } = props;
 
     // Import VPC from BaseAccountStack
-    const vpcId = cdk.Fn.importValue(`Hyperlane-${accountName}-VpcId`);
+    const vpcId = cdk.Fn.importValue(`${CF_PREFIX}-VpcId`);
     const availabilityZones = cdk.Fn.split(
       ",",
-      cdk.Fn.importValue(`Hyperlane-${accountName}-VpcAzs`),
+      cdk.Fn.importValue(`${CF_PREFIX}-VpcAzs`),
     );
     const privateSubnetIds = cdk.Fn.split(
       ",",
-      cdk.Fn.importValue(`Hyperlane-${accountName}-PrivateSubnetIds`),
+      cdk.Fn.importValue(`${CF_PREFIX}-PrivateSubnetIds`),
     );
 
     // Import VPC Cluster from BaseAccountStack
@@ -104,12 +72,8 @@ export class AgentStack extends cdk.Stack {
     });
 
     // Import ECS Cluster from BaseAccountStack
-    const clusterName = cdk.Fn.importValue(
-      `Hyperlane-${accountName}-ClusterName`,
-    );
-    const clusterArn = cdk.Fn.importValue(
-      `Hyperlane-${accountName}-ClusterArn`,
-    );
+    const clusterName = cdk.Fn.importValue(`${CF_PREFIX}-ClusterName`);
+    const clusterArn = cdk.Fn.importValue(`${CF_PREFIX}-ClusterArn`);
 
     this.cluster = ecs.Cluster.fromClusterAttributes(this, "Cluster", {
       clusterName,
@@ -119,10 +83,8 @@ export class AgentStack extends cdk.Stack {
     });
 
     // Import EFS from BaseAccountStack
-    const efsId = cdk.Fn.importValue(`Hyperlane-${accountName}-EfsId`);
-    const efsSecurityGroupId = cdk.Fn.importValue(
-      `Hyperlane-${accountName}-EfsSecurityGroupId`,
-    );
+    const efsId = cdk.Fn.importValue(`${CF_PREFIX}-EfsId`);
+    const efsSecurityGroupId = cdk.Fn.importValue(`${CF_PREFIX}-EfsSecurityGroupId`);
 
     this.fileSystem = efs.FileSystem.fromFileSystemAttributes(
       this,
@@ -136,6 +98,20 @@ export class AgentStack extends cdk.Stack {
         ),
       },
     );
+
+    const accessPoint = new efs.AccessPoint(this, "AccessPoint", {
+      fileSystem: this.fileSystem,
+      path: `/${uniqueId}`,
+      createAcl: {
+        ownerGid: "1000",
+        ownerUid: "1000",
+        permissions: "755",
+      },
+      posixUser: {
+        gid: "1000",
+        uid: "1000",
+      },
+    });
 
     // Task execution role - used by ECS to pull images and write logs
     const executionRole = new iam.Role(this, "ExecutionRole", {
@@ -153,12 +129,18 @@ export class AgentStack extends cdk.Stack {
       description: `Role for Hyperlane ${agentType} to access AWS resources`,
     });
 
-    // Create KMS key for validators (used for signing messages)
+    // Create KMS key for validators
     if (agentType === AgentType.Validator) {
       this.validatorKey = new kms.Key(this, "SigningKey", {
         description: `Signing key for Hyperlane validator ${uniqueId}`,
-        removalPolicy: cdk.RemovalPolicy.RETAIN, // Retain key on stack deletion for security
-        alias: `hyperlane-validator-${uniqueId}`,
+        alias: uniqueId,
+        // validators always use EVM compatible keys regardless of blockchain network
+        keySpec: kms.KeySpec.ECC_SECG_P256K1,
+        keyUsage: kms.KeyUsage.SIGN_VERIFY,
+        // never rotate to maintain signature validity
+        enableKeyRotation: false,
+        // retain key on stack deletion to be safe
+        removalPolicy: cdk.RemovalPolicy.RETAIN,
       });
 
       // Grant the task role permission to use the key
@@ -175,54 +157,60 @@ export class AgentStack extends cdk.Stack {
     }
 
     const logGroup = new logs.LogGroup(this, "LogGroup", {
-      logGroupName: `/ecs/hyperlane-${agentType}`,
+      logGroupName: `/ecs/hyperlane/${agentType}`,
       retention: logs.RetentionDays.ONE_WEEK,
-      removalPolicy: cdk.RemovalPolicy.DESTROY,
+      removalPolicy: cdk.RemovalPolicy.DESTROY, // TODO: probably keep this based on network
     });
 
     const taskDefinition = new ecs.FargateTaskDefinition(this, "TaskDef", {
-      memoryLimitMiB: props.memory || 1024,
-      cpu: props.cpu || 512,
+      memoryLimitMiB: 1024,
+      cpu: 512,
       executionRole,
       taskRole: this.taskRole,
     });
 
-    // Add EFS volume to task definition - used for local databases
     taskDefinition.addVolume({
       name: "agent-data",
       efsVolumeConfiguration: {
         fileSystemId: this.fileSystem.fileSystemId,
+        transitEncryption: "ENABLED",
+        authorizationConfig: {
+          accessPointId: accessPoint.accessPointId,
+          iam: "ENABLED",
+        },
       },
     });
 
-    // Add HYP_DB path for all agents
+    const dbPath = "/data";
     const environment: { [key: string]: string } = {
       ...(props.environment ?? {}),
-      HYP_DB: `/data/${uniqueId}/db`,
-      // TODO: rest of fields
+      HYP_DB: dbPath,
+      NO_COLOR: "1",
     };
 
     // Add KMS key alias for validators
     if (agentType === AgentType.Validator) {
       environment.HYP_VALIDATOR_TYPE = "aws";
-      environment.HYP_VALIDATOR_ID = `alias/hyperlane-validator-${uniqueId}`;
+      environment.HYP_VALIDATOR_ID = `alias/${uniqueId}`;
 
       // TODO: s3 bucket
+    }
+
+    if (agentType === AgentType.Relayer) {
+      // import required wallet keys (determine chains from env HYP_RELAYCHAINS) from secrets manager
+      // set in env vars
     }
 
     const containerConfig: ecs.ContainerDefinitionOptions = {
       image: ecs.ContainerImage.fromRegistry(ecrRepositoryUri),
       logging: ecs.LogDrivers.awsLogs({
-        streamPrefix: agentType,
+        streamPrefix: uniqueId,
         logGroup,
       }),
       environment,
       command: [`./${agentType}`],
       healthCheck: {
-        command: [
-          "CMD-SHELL",
-          "curl -f http://localhost:9090/metrics || exit 1",
-        ],
+        command: ["CMD-SHELL", `pgrep -f ${agentType} || exit 1`],
         interval: cdk.Duration.seconds(30),
         timeout: cdk.Duration.seconds(10),
         retries: 3,
@@ -238,21 +226,22 @@ export class AgentStack extends cdk.Stack {
       protocol: ecs.Protocol.TCP,
     });
 
-    // Mount the EFS volume in the container
-    // Each agent should use a different subdirectory via HYP_DB env var
-    // e.g., HYP_DB=/data/validator-evm-1/db
     container.addMountPoints({
       sourceVolume: "agent-data",
-      containerPath: "/data",
+      containerPath: dbPath,
       readOnly: false,
     });
 
     this.service = new ecs.FargateService(this, "Service", {
       cluster: this.cluster,
       taskDefinition,
-      desiredCount: props.desiredCount || 1,
-      serviceName: `hyperlane-${agentType}`,
+      desiredCount: 1,
+      serviceName: uniqueId,
       enableExecuteCommand: true,
+      // Ensure only 1 task runs at a time to prevent database locking issues
+      // This will incur downtime during deployments
+      minHealthyPercent: 0,
+      maxHealthyPercent: 100,
     });
 
     this.fileSystem.connections.allowDefaultPortFrom(this.service.connections);
@@ -272,13 +261,6 @@ export class AgentStack extends cdk.Stack {
       description: "CloudWatch Log Group",
     });
 
-    new cdk.CfnOutput(this, "FileSystemId", {
-      value: this.fileSystem.fileSystemId,
-      description: "EFS File System ID",
-      exportName: `Hyperlane-${agentType}-FileSystemId`,
-    });
-
-    // Output KMS key ARN for validators
     if (this.validatorKey) {
       new cdk.CfnOutput(this, "SigningKeyArn", {
         value: this.validatorKey.keyArn,

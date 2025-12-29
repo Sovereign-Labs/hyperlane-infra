@@ -35,14 +35,15 @@ new AgentStack(app, "TestRelayer", {
     account: coreAccount.id,
     region,
   },
-  accountName: coreAccount.name.toLowerCase(),
   uniqueId: "relayer-test-1",
   agentType: AgentType.Relayer,
+  ecrRepositoryUri: `${coreAccount.id}.dkr.ecr.${region}.amazonaws.com/hyperlane-agents`,
+  bucketArn: `arn:aws:s3:::hyperlane-${coreAccount.name.toLowerCase()}-signatures`,
   environment: {
-    HYP_CHAINS: "ethereum,polygon",
-    HYP_RELAYCHAINS: "ethereum,polygon",
+    HYP_RELAYCHAINS: "sovstarter,ethtest",
+    HYP_CHAINS_SOVSTARTER_SIGNER_KEY:
+      "0x5087c12ea7c12024b3f798c5d73587463af17c9fce04d9e6fe873893102a6c64",
+    HYP_CHAINS_ETHTEST_SIGNER_KEY:
+      "0x7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6",
   },
-  cpu: 512,
-  memory: 1024,
-  desiredCount: 1,
 });

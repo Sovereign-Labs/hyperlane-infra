@@ -4,14 +4,9 @@ import * as ecs from "aws-cdk-lib/aws-ecs";
 import * as efs from "aws-cdk-lib/aws-efs";
 import * as iam from "aws-cdk-lib/aws-iam";
 import { Construct } from "constructs";
+import { CF_PREFIX } from "./constants";
 
 export interface BaseAccountStackProps extends cdk.StackProps {
-  /**
-   * A unique identifier for this account (e.g., "validator1", "validator2", "main")
-   * Used for consistent naming across stacks
-   */
-  accountName: string;
-
   /**
    * Maximum number of Availability Zones to use
    * Default: 2
@@ -44,23 +39,6 @@ export interface BaseAccountStackProps extends cdk.StackProps {
  *
  * This stack should be deployed ONCE per AWS account.
  * Multiple validator sets can then reference these resources via CloudFormation imports.
- *
- * Naming Convention:
- * - VPC: hyperlane-{accountName}-vpc
- * - ECS Cluster: hyperlane-{accountName}-cluster
- * - EFS: hyperlane-{accountName}-efs
- * - EFS Security Group: hyperlane-{accountName}-efs-sg
- *
- * CloudFormation Exports:
- * - Hyperlane-{accountName}-VpcId
- * - Hyperlane-{accountName}-VpcCidr
- * - Hyperlane-{accountName}-VpcAzs
- * - Hyperlane-{accountName}-PrivateSubnetIds
- * - Hyperlane-{accountName}-PublicSubnetIds
- * - Hyperlane-{accountName}-ClusterName
- * - Hyperlane-{accountName}-ClusterArn
- * - Hyperlane-{accountName}-EfsId
- * - Hyperlane-{accountName}-EfsSecurityGroupId
  */
 export class BaseAccountStack extends cdk.Stack {
   public readonly vpc: ec2.Vpc;
@@ -70,8 +48,6 @@ export class BaseAccountStack extends cdk.Stack {
 
   constructor(scope: Construct, id: string, props: BaseAccountStackProps) {
     super(scope, id, props);
-
-    const { accountName } = props;
 
     // ========================================================================
     // VPC
@@ -91,7 +67,7 @@ export class BaseAccountStack extends cdk.Stack {
     ];
 
     this.vpc = new ec2.Vpc(this, "Vpc", {
-      vpcName: `hyperlane-${accountName}-vpc`,
+      vpcName: "hyperlane-vpc",
       maxAzs: props.maxAzs || 2,
       natGateways: props.natGateways || 1,
       subnetConfiguration,
@@ -130,7 +106,7 @@ export class BaseAccountStack extends cdk.Stack {
 
     this.cluster = new ecs.Cluster(this, "Cluster", {
       vpc: this.vpc,
-      clusterName: `hyperlane-${accountName}-cluster`,
+      clusterName: "hyperlane-cluster",
       containerInsights: true,
     });
 
@@ -141,13 +117,13 @@ export class BaseAccountStack extends cdk.Stack {
     // manually created so we can export it and use in other stacks
     this.efsSecurityGroup = new ec2.SecurityGroup(this, "EfsSecurityGroup", {
       vpc: this.vpc,
-      securityGroupName: `hyperlane-${accountName}-efs-sg`,
-      description: `Security group for Hyperlane EFS in ${accountName}`,
+      securityGroupName: "hyperlane-efs-sg",
+      description: "Security group for Hyperlane EFS",
     });
 
     this.fileSystem = new efs.FileSystem(this, "FileSystem", {
       vpc: this.vpc,
-      fileSystemName: `hyperlane-${accountName}-efs`,
+      fileSystemName: "hyperlane-efs",
       lifecyclePolicy: efs.LifecyclePolicy.AFTER_7_DAYS,
       performanceMode: efs.PerformanceMode.GENERAL_PURPOSE,
       throughputMode: efs.ThroughputMode.BURSTING,
@@ -181,20 +157,17 @@ export class BaseAccountStack extends cdk.Stack {
     // VPC exports
     new cdk.CfnOutput(this, "VpcId", {
       value: this.vpc.vpcId,
-      description: `VPC ID for ${accountName}`,
-      exportName: `Hyperlane-${accountName}-VpcId`,
+      exportName: `${CF_PREFIX}-VpcId`,
     });
 
     new cdk.CfnOutput(this, "VpcCidr", {
       value: this.vpc.vpcCidrBlock,
-      description: `VPC CIDR block for ${accountName}`,
-      exportName: `Hyperlane-${accountName}-VpcCidr`,
+      exportName: `${CF_PREFIX}-VpcCidr`,
     });
 
     new cdk.CfnOutput(this, "VpcAvailabilityZones", {
       value: cdk.Fn.join(",", this.vpc.availabilityZones),
-      description: `VPC availability zones for ${accountName}`,
-      exportName: `Hyperlane-${accountName}-VpcAzs`,
+      exportName: `${CF_PREFIX}-VpcAzs`,
     });
 
     new cdk.CfnOutput(this, "PrivateSubnetIds", {
@@ -202,8 +175,7 @@ export class BaseAccountStack extends cdk.Stack {
         ",",
         this.vpc.privateSubnets.map((s) => s.subnetId),
       ),
-      description: `Private subnet IDs for ${accountName}`,
-      exportName: `Hyperlane-${accountName}-PrivateSubnetIds`,
+      exportName: `${CF_PREFIX}-PrivateSubnetIds`,
     });
 
     new cdk.CfnOutput(this, "PublicSubnetIds", {
@@ -211,34 +183,29 @@ export class BaseAccountStack extends cdk.Stack {
         ",",
         this.vpc.publicSubnets.map((s) => s.subnetId),
       ),
-      description: `Public subnet IDs for ${accountName}`,
-      exportName: `Hyperlane-${accountName}-PublicSubnetIds`,
+      exportName: `${CF_PREFIX}-PublicSubnetIds`,
     });
 
     // Export EFS details
     new cdk.CfnOutput(this, "EfsId", {
       value: this.fileSystem.fileSystemId,
-      description: `Shared EFS file system ID for ${accountName}`,
-      exportName: `Hyperlane-${accountName}-EfsId`,
+      exportName: `${CF_PREFIX}-EfsId`,
     });
 
     new cdk.CfnOutput(this, "EfsSecurityGroupId", {
       value: this.efsSecurityGroup.securityGroupId,
-      description: `EFS security group ID for ${accountName}`,
-      exportName: `Hyperlane-${accountName}-EfsSecurityGroupId`,
+      exportName: `${CF_PREFIX}-EfsSecurityGroupId`,
     });
 
     // ECS Cluster exports
     new cdk.CfnOutput(this, "ClusterName", {
       value: this.cluster.clusterName,
-      description: `ECS cluster name for ${accountName}`,
-      exportName: `Hyperlane-${accountName}-ClusterName`,
+      exportName: `${CF_PREFIX}-ClusterName`,
     });
 
     new cdk.CfnOutput(this, "ClusterArn", {
       value: this.cluster.clusterArn,
-      description: `ECS cluster ARN for ${accountName}`,
-      exportName: `Hyperlane-${accountName}-ClusterArn`,
+      exportName: `${CF_PREFIX}-ClusterArn`,
     });
   }
 }
