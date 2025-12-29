@@ -191,12 +191,15 @@ export class AgentStack extends cdk.Stack {
       NO_COLOR: "1",
     };
 
-    // Add KMS key alias for validators
     if (agentType === AgentType.Validator) {
+      // validator key, KMS always prefixes alias with "alias/*"
       environment.HYP_VALIDATOR_TYPE = "aws";
       environment.HYP_VALIDATOR_ID = `alias/${uniqueId}`;
 
-      // TODO: s3 bucket
+      // s3 bucket
+      environment.HYP_CHECKPOINTSYNCER_TYPE = "s3";
+      environment.HYP_CHECKPOINTSYNCER_BUCKET = bucket.bucketName;
+      environment.HYP_CHECKPOINTSYNCER_FOLDER = uniqueId;
     }
 
     const containerConfig: ecs.ContainerDefinitionOptions = {
