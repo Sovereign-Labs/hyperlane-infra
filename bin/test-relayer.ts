@@ -41,9 +41,5 @@ new AgentStack(app, "TestRelayer", {
   bucketArn: `arn:aws:s3:::hyperlane-${coreAccount.name.toLowerCase()}-signatures`,
   environment: {
     HYP_RELAYCHAINS: "sovstarter,ethtest",
-    HYP_CHAINS_SOVSTARTER_SIGNER_KEY:
-      "0x5087c12ea7c12024b3f798c5d73587463af17c9fce04d9e6fe873893102a6c64",
-    HYP_CHAINS_ETHTEST_SIGNER_KEY:
-      "0x7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6",
   },
 });

@@ -1,9 +1,6 @@
 {
   "name": "hyperlane-infra",
   "version": "0.1.0",
-  "bin": {
-    "hyperlane-infra": "bin/hyperlane-infra.js"
-  },
   "scripts": {
     "build": "tsc",
     "watch": "tsc -w",

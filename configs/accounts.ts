@@ -1,3 +1,5 @@
+import { Environment } from "aws-cdk-lib";
+
 export type Account = {
   name: string;
   id: string;
@@ -8,7 +10,6 @@ export type Account = {
 };
 
 export enum NetworkType {
-  Devnet = "devnet",
   Testnet = "testnet",
   Mainnet = "mainnet",
 }
@@ -27,7 +28,16 @@ export const CORE_ACCOUNTS: Account[] = [
   },
 ];
 
-export const CUSTOMER_ACCOUNTS: Account[] = [];
+export const CUSTOMER_ACCOUNTS: Account[] = [
+  // test rollup deployed in Ross' account
+  // Pretend Ross is a customer so a validator is deployed here
+  {
+    name: "Ross",
+    id: "590183691025",
+    team: "sovereign",
+    network: NetworkType.Testnet,
+  },
+];
 
 // We use a 2 of 3 validator set, 1 in customers account, 1 in core sovereing account
 // and 1 in overflow accounts
@@ -56,8 +66,6 @@ export function getNetworkType(account: Account): NetworkType {
   const lowerName = account.name.toLowerCase().split(" ")[1];
 
   switch (lowerName) {
-    case "devnet":
-      return NetworkType.Devnet;
     case "testnet":
       return NetworkType.Testnet;
     case "mainnet":
@@ -94,15 +102,20 @@ export function accountsForNetwork(network: NetworkType): Account[] {
   });
 }
 
+// Normalize account name for use in resource names (e.g. S3 bucket names)
+export function normalizeAccountName(name: string): string {
+  return name.replace(" ", "-");
+}
+
 // Account that hosts the ECR repository for hyperlane agent images.
 // This should be considered a production account and will be used by all agents
 // regardless of network.
 //
 // Sovereign mainnet
-export const ECR_ACCOUNT_ID = "744159939852";
+export const ECR_ENV: Environment = { account: "744159939852" };
 
-if (!CORE_ACCOUNTS.some((acc) => acc.id === ECR_ACCOUNT_ID)) {
+if (!CORE_ACCOUNTS.some((acc) => acc.id === ECR_ENV.account)) {
   throw new Error(
-    `ECR_ACCOUNT ${ECR_ACCOUNT_ID} must be a core account in CORE_ACCOUNTS`,
+    `ECR_ACCOUNT ${ECR_ENV.account} must be a core account in CORE_ACCOUNTS`,
   );
 }

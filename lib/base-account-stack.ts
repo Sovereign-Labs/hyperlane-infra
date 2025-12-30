@@ -107,7 +107,7 @@ export class BaseAccountStack extends cdk.Stack {
     this.cluster = new ecs.Cluster(this, "Cluster", {
       vpc: this.vpc,
       clusterName: "hyperlane-cluster",
-      containerInsights: true,
+      containerInsightsV2: ecs.ContainerInsights.ENABLED,
     });
 
     // ========================================================================
