@@ -87,6 +87,16 @@ export function getTeamName(account: Account): string {
   return account.name.toLowerCase().split(" ")[0];
 }
 
+export function getAccountById(accountId: string): Account {
+  const account = HYPERLANE_ACCOUNTS.find((acc) => acc.id === accountId);
+
+  if (!account) {
+    throw new Error(`Account with ID ${accountId} not found`);
+  }
+
+  return account;
+}
+
 // List of accounts that use hyperlane and thus will have base infrastructure deployed.
 // Each account in this list has a `BaseAccountStack` deployed.
 export const HYPERLANE_ACCOUNTS: Account[] = [
@@ -104,7 +114,7 @@ export function accountsForNetwork(network: NetworkType): Account[] {
 
 // Normalize account name for use in resource names (e.g. S3 bucket names)
 export function normalizeAccountName(name: string): string {
-  return name.replace(" ", "-");
+  return name.replaceAll(" ", "-");
 }
 
 // Account that hosts the ECR repository for hyperlane agent images.

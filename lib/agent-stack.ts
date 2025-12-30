@@ -5,10 +5,10 @@ import * as iam from "aws-cdk-lib/aws-iam";
 import * as logs from "aws-cdk-lib/aws-logs";
 import * as s3 from "aws-cdk-lib/aws-s3";
 import * as efs from "aws-cdk-lib/aws-efs";
+import * as ecr from "aws-cdk-lib/aws-ecr";
 import * as kms from "aws-cdk-lib/aws-kms";
 import * as secretsmanager from "aws-cdk-lib/aws-secretsmanager";
 import { Construct } from "constructs";
-import { CF_PREFIX } from "./constants";
 
 export enum AgentType {
   Relayer = "relayer",
@@ -22,17 +22,20 @@ export interface AgentStackProps extends cdk.StackProps {
   /** The type of the agent */
   agentType: AgentType;
 
-  /**
-   * ECR repository URI for the agent container image
-   * Example: "123456789012.dkr.ecr.us-east-1.amazonaws.com/hyperlane-agents"
-   */
-  ecrRepositoryUri: string;
+  /** ECS Cluster to deploy the agent in (contains VPC reference) */
+  cluster: ecs.ICluster;
 
-  /**
-   * S3 bucket ARN for validator signatures
-   * Example: "arn:aws:s3:::hyperlane-signatures"
-   */
-  bucketArn: string;
+  /** EFS file system for persistent storage */
+  fileSystem: efs.IFileSystem;
+
+  /** Security group for EFS access */
+  efsSecurityGroup: ec2.ISecurityGroup;
+
+  /** ECR repository containing the agent image */
+  repository: ecr.IRepository;
+
+  /** S3 bucket for validator signatures */
+  bucket: s3.IBucket;
 
   /**
    * Environment variables for the agent container
@@ -42,68 +45,25 @@ export interface AgentStackProps extends cdk.StackProps {
 }
 
 export class AgentStack extends cdk.Stack {
-  public readonly cluster: ecs.ICluster;
   public readonly service: ecs.FargateService;
   public readonly taskRole: iam.Role;
-  public readonly fileSystem: efs.IFileSystem;
-  public readonly vpc: ec2.IVpc;
   public readonly validatorKey?: kms.Key;
 
   constructor(scope: Construct, id: string, props: AgentStackProps) {
     super(scope, id, props);
 
-    const { uniqueId, agentType, ecrRepositoryUri, bucketArn } = props;
-
-    // Import VPC from BaseAccountStack
-    const vpcId = cdk.Fn.importValue(`${CF_PREFIX}-VpcId`);
-    const availabilityZones = cdk.Fn.split(
-      ",",
-      cdk.Fn.importValue(`${CF_PREFIX}-VpcAzs`),
-    );
-    const privateSubnetIds = cdk.Fn.split(
-      ",",
-      cdk.Fn.importValue(`${CF_PREFIX}-PrivateSubnetIds`),
-    );
-
-    // Import VPC Cluster from BaseAccountStack
-    this.vpc = ec2.Vpc.fromVpcAttributes(this, "Vpc", {
-      vpcId,
-      availabilityZones,
-      privateSubnetIds,
-    });
-
-    // Import ECS Cluster from BaseAccountStack
-    const clusterName = cdk.Fn.importValue(`${CF_PREFIX}-ClusterName`);
-    const clusterArn = cdk.Fn.importValue(`${CF_PREFIX}-ClusterArn`);
-
-    this.cluster = ecs.Cluster.fromClusterAttributes(this, "Cluster", {
-      clusterName,
-      clusterArn,
-      vpc: this.vpc,
-      securityGroups: [],
-    });
-
-    // Import EFS from BaseAccountStack
-    const efsId = cdk.Fn.importValue(`${CF_PREFIX}-EfsId`);
-    const efsSecurityGroupId = cdk.Fn.importValue(
-      `${CF_PREFIX}-EfsSecurityGroupId`,
-    );
-
-    this.fileSystem = efs.FileSystem.fromFileSystemAttributes(
-      this,
-      "FileSystem",
-      {
-        fileSystemId: efsId,
-        securityGroup: ec2.SecurityGroup.fromSecurityGroupId(
-          this,
-          "EfsSecurityGroup",
-          efsSecurityGroupId,
-        ),
-      },
-    );
+    const {
+      uniqueId,
+      agentType,
+      cluster,
+      fileSystem,
+      efsSecurityGroup,
+      repository,
+      bucket,
+    } = props;
 
     const accessPoint = new efs.AccessPoint(this, "AccessPoint", {
-      fileSystem: this.fileSystem,
+      fileSystem,
       path: `/${uniqueId}`,
       createAcl: {
         ownerGid: "1000",
@@ -150,8 +110,6 @@ export class AgentStack extends cdk.Stack {
       this.validatorKey.grantEncryptDecrypt(this.taskRole);
     }
 
-    const bucket = s3.Bucket.fromBucketArn(this, "SignaturesBucket", bucketArn);
-
     // Grant S3 permissions (works for both same-account and cross-account)
     // Only validator needs write access
     bucket.grantRead(this.taskRole);
@@ -175,7 +133,7 @@ export class AgentStack extends cdk.Stack {
     taskDefinition.addVolume({
       name: "agent-data",
       efsVolumeConfiguration: {
-        fileSystemId: this.fileSystem.fileSystemId,
+        fileSystemId: fileSystem.fileSystemId,
         transitEncryption: "ENABLED",
         authorizationConfig: {
           accessPointId: accessPoint.accessPointId,
@@ -203,7 +161,7 @@ export class AgentStack extends cdk.Stack {
     }
 
     const containerConfig: ecs.ContainerDefinitionOptions = {
-      image: ecs.ContainerImage.fromRegistry(ecrRepositoryUri),
+      image: ecs.ContainerImage.fromEcrRepository(repository),
       logging: ecs.LogDrivers.awsLogs({
         streamPrefix: uniqueId,
         logGroup,
@@ -244,14 +202,16 @@ export class AgentStack extends cdk.Stack {
         const secret = secretsmanager.Secret.fromSecretNameV2(
           this,
           `SignerKeySecret-${chain}`,
-          `hyperlane/${chain}-wallet`,
+          `hyperlane/${chain}/wallet`,
         );
+
+        secret.grantRead(executionRole);
         container.addSecret(envVar, ecs.Secret.fromSecretsManager(secret));
       }
     }
 
     this.service = new ecs.FargateService(this, "Service", {
-      cluster: this.cluster,
+      cluster,
       taskDefinition,
       desiredCount: 1,
       serviceName: uniqueId,
@@ -262,10 +222,13 @@ export class AgentStack extends cdk.Stack {
       maxHealthyPercent: 100,
     });
 
-    this.fileSystem.connections.allowDefaultPortFrom(this.service.connections);
+    // Allow ECS tasks to access EFS on port 2049 (NFS)
+    // Add rule to service's security group instead of EFS security group
+    // to avoid circular dependency between stacks
+    this.service.connections.allowTo(efsSecurityGroup, ec2.Port.NFS);
 
     new cdk.CfnOutput(this, "ClusterName", {
-      value: this.cluster.clusterName,
+      value: cluster.clusterName,
       description: "ECS Cluster name",
     });
 
@@ -283,7 +246,6 @@ export class AgentStack extends cdk.Stack {
       new cdk.CfnOutput(this, "SigningKeyArn", {
         value: this.validatorKey.keyArn,
         description: "KMS signing key ARN for validator",
-        exportName: `Hyperlane-Validator-${uniqueId}-SigningKeyArn`,
       });
 
       new cdk.CfnOutput(this, "SigningKeyId", {

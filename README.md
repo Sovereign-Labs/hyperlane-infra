@@ -27,7 +27,7 @@ Following this convention allows us flexiblity to update stacks by purpose & net
 
 - `Hyperlane-BaseInfra*` Deploy all base infrastructure stacks to all accounts
 - `Hyperlane-BaseInfra-Testnet-*` Deploy all base infrastructure stacks to all testnet accounts
-- `Hyperlane-BaseInfra-*-GTE` Deploy base infrastructure stacks to all GTE customer accounts for all networks
+- `Hyperlane-BaseInfra-*-GTE*` Deploy base infrastructure stacks to all GTE customer accounts for all networks
 
 Example:
 

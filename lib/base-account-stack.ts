@@ -4,7 +4,6 @@ import * as ecs from "aws-cdk-lib/aws-ecs";
 import * as efs from "aws-cdk-lib/aws-efs";
 import * as iam from "aws-cdk-lib/aws-iam";
 import { Construct } from "constructs";
-import { CF_PREFIX } from "./constants";
 
 export interface BaseAccountStackProps extends cdk.StackProps {
   /**
@@ -38,20 +37,15 @@ export interface BaseAccountStackProps extends cdk.StackProps {
  * - VPC endpoints (optional)
  *
  * This stack should be deployed ONCE per AWS account.
- * Multiple validator sets can then reference these resources via CloudFormation imports.
  */
 export class BaseAccountStack extends cdk.Stack {
   public readonly vpc: ec2.Vpc;
   public readonly cluster: ecs.Cluster;
-  public readonly fileSystem?: efs.FileSystem;
-  public readonly efsSecurityGroup?: ec2.SecurityGroup;
+  public readonly fileSystem: efs.FileSystem;
+  public readonly efsSecurityGroup: ec2.ISecurityGroup;
 
   constructor(scope: Construct, id: string, props: BaseAccountStackProps) {
     super(scope, id, props);
-
-    // ========================================================================
-    // VPC
-    // ========================================================================
 
     const subnetConfiguration: ec2.SubnetConfiguration[] = [
       {
@@ -100,29 +94,22 @@ export class BaseAccountStack extends cdk.Stack {
       });
     }
 
-    // ========================================================================
-    // ECS Cluster (shared by all agents in this account)
-    // ========================================================================
-
     this.cluster = new ecs.Cluster(this, "Cluster", {
       vpc: this.vpc,
       clusterName: "hyperlane-cluster",
       containerInsightsV2: ecs.ContainerInsights.ENABLED,
     });
 
-    // ========================================================================
-    // EFS File System (shared storage for all agents)
-    // ========================================================================
-
-    // manually created so we can export it and use in other stacks
+    // Create security group for EFS
     this.efsSecurityGroup = new ec2.SecurityGroup(this, "EfsSecurityGroup", {
       vpc: this.vpc,
-      securityGroupName: "hyperlane-efs-sg",
-      description: "Security group for Hyperlane EFS",
+      description: "Security group for EFS file system",
+      allowAllOutbound: false,
     });
 
     this.fileSystem = new efs.FileSystem(this, "FileSystem", {
       vpc: this.vpc,
+      securityGroup: this.efsSecurityGroup,
       fileSystemName: "hyperlane-efs",
       lifecyclePolicy: efs.LifecyclePolicy.AFTER_7_DAYS,
       performanceMode: efs.PerformanceMode.GENERAL_PURPOSE,
@@ -150,62 +137,19 @@ export class BaseAccountStack extends cdk.Stack {
       }),
     );
 
-    // ========================================================================
-    // CloudFormation Exports
-    // ========================================================================
-
-    // VPC exports
     new cdk.CfnOutput(this, "VpcId", {
       value: this.vpc.vpcId,
-      exportName: `${CF_PREFIX}-VpcId`,
+      description: "VPC ID",
     });
 
-    new cdk.CfnOutput(this, "VpcCidr", {
-      value: this.vpc.vpcCidrBlock,
-      exportName: `${CF_PREFIX}-VpcCidr`,
-    });
-
-    new cdk.CfnOutput(this, "VpcAvailabilityZones", {
-      value: cdk.Fn.join(",", this.vpc.availabilityZones),
-      exportName: `${CF_PREFIX}-VpcAzs`,
-    });
-
-    new cdk.CfnOutput(this, "PrivateSubnetIds", {
-      value: cdk.Fn.join(
-        ",",
-        this.vpc.privateSubnets.map((s) => s.subnetId),
-      ),
-      exportName: `${CF_PREFIX}-PrivateSubnetIds`,
-    });
-
-    new cdk.CfnOutput(this, "PublicSubnetIds", {
-      value: cdk.Fn.join(
-        ",",
-        this.vpc.publicSubnets.map((s) => s.subnetId),
-      ),
-      exportName: `${CF_PREFIX}-PublicSubnetIds`,
-    });
-
-    // Export EFS details
-    new cdk.CfnOutput(this, "EfsId", {
-      value: this.fileSystem.fileSystemId,
-      exportName: `${CF_PREFIX}-EfsId`,
-    });
-
-    new cdk.CfnOutput(this, "EfsSecurityGroupId", {
-      value: this.efsSecurityGroup.securityGroupId,
-      exportName: `${CF_PREFIX}-EfsSecurityGroupId`,
-    });
-
-    // ECS Cluster exports
     new cdk.CfnOutput(this, "ClusterName", {
       value: this.cluster.clusterName,
-      exportName: `${CF_PREFIX}-ClusterName`,
+      description: "ECS cluster name",
     });
 
-    new cdk.CfnOutput(this, "ClusterArn", {
-      value: this.cluster.clusterArn,
-      exportName: `${CF_PREFIX}-ClusterArn`,
+    new cdk.CfnOutput(this, "EfsId", {
+      value: this.fileSystem.fileSystemId,
+      description: "EFS file system ID",
     });
   }
 }
