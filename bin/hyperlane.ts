@@ -12,9 +12,12 @@ import {
   CORE_ACCOUNTS,
   normalizeAccountName,
   getAccountById,
+  getTeamName,
+  Account,
 } from "../configs/accounts";
-import { relayerConfigs } from "../configs/agents";
+import { relayerConfigs, validatorSets } from "../configs/agents";
 import { EcrStack } from "../lib/ecr-stack";
+import { ValidatorKeyStack } from "../lib/validator-key-stack";
 
 function capitalize(str: string): string {
   const s = str.toLowerCase();
@@ -22,18 +25,23 @@ function capitalize(str: string): string {
 }
 
 // So we can have consistent stack ids
-function id(purpose: string, network?: string, accountName?: string): string {
+function id(purpose: string, network?: string, ...parts: string[]): string {
   let id = `Hyperlane-${purpose}`;
 
   if (network) {
     id += `-${capitalize(network)}`;
   }
 
-  if (accountName) {
-    id += `-${accountName}`;
+  for (const part of parts) {
+    id += `-${part}`;
   }
 
   return id;
+}
+
+function applyAccountTags(stack: cdk.Stack, account: Account) {
+  stack.addStackTag("Team", getTeamName(account));
+  stack.addStackTag("Network", getNetworkType(account));
 }
 
 const app = new cdk.App();
@@ -59,7 +67,9 @@ for (const account of CORE_ACCOUNTS) {
       region,
     },
     trustedAccountIds,
+    network,
   });
+  applyAccountTags(stack, account);
 
   signatureBuckets[network] = stack;
 }
@@ -87,6 +97,8 @@ for (const account of HYPERLANE_ACCOUNTS) {
       enableVpcEndpoints: true,
     },
   );
+  applyAccountTags(stack, account);
+
   baseStacks[account.id] = stack;
 }
 
@@ -96,29 +108,103 @@ for (const relayer of relayerConfigs) {
   const accountName = normalizeAccountName(account.name);
   const network = getNetworkType(account);
   const agentType = AgentType.Relayer;
-  const baseStack = baseStacks[account.id];
+  const { cluster, fileSystem, efsSecurityGroup } = baseStacks[account.id];
   const bucket = signatureBuckets[network].bucket;
 
-  new AgentStack(app, id(capitalize(agentType), network, accountName), {
-    env: {
-      account: account.id,
-      region,
+  const stack = new AgentStack(
+    app,
+    id(capitalize(agentType), network, accountName),
+    {
+      env: {
+        account: account.id,
+        region,
+      },
+      uniqueId: relayer.uniqueId,
+      agentType,
+      cluster,
+      fileSystem,
+      efsSecurityGroup,
+      repository: ecr.repository,
+      bucket,
+      environment: {
+        HYP_RELAYCHAINS: relayer.chains.join(","),
+      },
     },
-    uniqueId: relayer.uniqueId,
-    agentType,
-    cluster: baseStack.cluster,
-    fileSystem: baseStack.fileSystem,
-    efsSecurityGroup: baseStack.efsSecurityGroup,
-    repository: ecr.repository,
-    bucket,
-    environment: {
-      HYP_RELAYCHAINS: relayer.chains.join(","),
-    },
-  });
+  );
+
+  stack.addStackTag("Agent", agentType);
+  applyAccountTags(stack, account);
 }
 
-// Create validator keys
-// This is done as a separate stack so we can create the keys before starting the agents
-// We need to create the keys, announce the validator on chain, then deploy the validator
-//
-// Deploy validator sets
+let validatorKeyStacks: { [accountId: string]: ValidatorKeyStack } = {};
+
+const validatorAccounts = Object.groupBy(
+  validatorSets.flat(),
+  (v) => v.accountId,
+);
+
+// deploy validator keys
+for (const [accountId, configs] of Object.entries(validatorAccounts)) {
+  if (!configs) continue;
+
+  const account = getAccountById(accountId);
+  const accountName = normalizeAccountName(account.name);
+  const network = getNetworkType(account);
+  const keyConfs = configs.map((c) => ({
+    alias: c.uniqueId,
+    chain: c.chain,
+  }));
+
+  const stack = new ValidatorKeyStack(
+    app,
+    id("ValidatorKey", network, accountName),
+    {
+      env: {
+        account: accountId,
+        region,
+      },
+      configs: keyConfs,
+    },
+  );
+
+  applyAccountTags(stack, account);
+  validatorKeyStacks[accountId] = stack;
+}
+
+// deploy validator sets
+for (const validatorSet of validatorSets) {
+  for (const validator of validatorSet) {
+    const { accountId, uniqueId, chain } = validator;
+    const validatorKey = validatorKeyStacks[accountId]?.keys[uniqueId];
+    const account = getAccountById(accountId);
+    const network = getNetworkType(account);
+    const agentType = AgentType.Validator;
+    const { cluster, fileSystem, efsSecurityGroup } = baseStacks[account.id];
+    const bucket = signatureBuckets[network].bucket;
+    const stack = new AgentStack(
+      app,
+      id(capitalize(agentType), network, uniqueId),
+      {
+        env: {
+          account: accountId,
+          region,
+        },
+        uniqueId,
+        agentType,
+        cluster,
+        fileSystem,
+        efsSecurityGroup,
+        repository: ecr.repository,
+        bucket,
+        validatorKey,
+        environment: {
+          HYP_ORIGINCHAINNAME: chain,
+        },
+      },
+    );
+
+    stack.addStackTag("Agent", agentType);
+    stack.addStackTag("Chain", chain);
+    applyAccountTags(stack, account);
+  }
+}

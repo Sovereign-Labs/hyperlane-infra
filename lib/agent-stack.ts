@@ -37,6 +37,9 @@ export interface AgentStackProps extends cdk.StackProps {
   /** S3 bucket for validator signatures */
   bucket: s3.IBucket;
 
+  /** KMS key alias for validator signing (only for Validator agents) */
+  validatorKey?: kms.IAlias;
+
   /**
    * Environment variables for the agent container
    * Example (for relayer): { HYP_RELAYCHAINS: 'ethtest,sovstarter' }
@@ -60,6 +63,7 @@ export class AgentStack extends cdk.Stack {
       efsSecurityGroup,
       repository,
       bucket,
+      validatorKey,
     } = props;
 
     const accessPoint = new efs.AccessPoint(this, "AccessPoint", {
@@ -88,27 +92,10 @@ export class AgentStack extends cdk.Stack {
 
     // Task role - used by the container itself to access AWS resources
     this.taskRole = new iam.Role(this, "TaskRole", {
+      roleName: `hyperlane-${uniqueId}-task-role`,
       assumedBy: new iam.ServicePrincipal("ecs-tasks.amazonaws.com"),
       description: `Role for Hyperlane ${agentType} to access AWS resources`,
     });
-
-    // Create KMS key for validators
-    if (agentType === AgentType.Validator) {
-      this.validatorKey = new kms.Key(this, "SigningKey", {
-        description: `Signing key for Hyperlane validator ${uniqueId}`,
-        alias: uniqueId,
-        // validators always use EVM compatible keys regardless of blockchain network
-        keySpec: kms.KeySpec.ECC_SECG_P256K1,
-        keyUsage: kms.KeyUsage.SIGN_VERIFY,
-        // never rotate to maintain signature validity
-        enableKeyRotation: false,
-        // retain key on stack deletion to be safe
-        removalPolicy: cdk.RemovalPolicy.RETAIN,
-      });
-
-      // Grant the task role permission to use the key
-      this.validatorKey.grantEncryptDecrypt(this.taskRole);
-    }
 
     // Grant S3 permissions (works for both same-account and cross-account)
     // Only validator needs write access
@@ -150,9 +137,14 @@ export class AgentStack extends cdk.Stack {
     };
 
     if (agentType === AgentType.Validator) {
-      // validator key, KMS always prefixes alias with "alias/*"
-      environment.HYP_VALIDATOR_TYPE = "aws";
-      environment.HYP_VALIDATOR_ID = `alias/${uniqueId}`;
+      // If this is not passed the validator will fail at runtime
+      // We can't throw a error here because it causes the hyperlane app stack to fail
+      // to synth if we haven't created the validators key yet
+      if (validatorKey) {
+        validatorKey.grantSignVerify(this.taskRole);
+        environment.HYP_VALIDATOR_TYPE = "aws";
+        environment.HYP_VALIDATOR_ID = validatorKey.aliasName;
+      }
 
       // s3 bucket
       environment.HYP_CHECKPOINTSYNCER_TYPE = "s3";

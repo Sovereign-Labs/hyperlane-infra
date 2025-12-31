@@ -12,6 +12,8 @@ export interface SignatureStackProps extends cdk.StackProps {
    * Example: ['123456789012', '098765432109']
    */
   trustedAccountIds?: string[];
+
+  network: string;
 }
 
 export class SignatureStack extends cdk.Stack {
@@ -20,7 +22,10 @@ export class SignatureStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: SignatureStackProps) {
     super(scope, id, props);
 
+    const { network, trustedAccountIds } = props;
+
     this.bucket = new s3.Bucket(this, "HyperlaneAgentsBucket", {
+      bucketName: `hyperlane-signatures-${network}`,
       encryption: s3.BucketEncryption.S3_MANAGED,
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
       // these don't need to persist long-term
@@ -28,7 +33,7 @@ export class SignatureStack extends cdk.Stack {
       autoDeleteObjects: true,
     });
 
-    const s3TrustedAccounts = props?.trustedAccountIds ?? [];
+    const s3TrustedAccounts = trustedAccountIds ?? [];
 
     // Add cross-account access policy if trusted accounts are specified
     if (s3TrustedAccounts.length) {
