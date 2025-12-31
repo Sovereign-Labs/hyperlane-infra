@@ -55,33 +55,18 @@ class ValidatorSetBuilder {
   }
 }
 
-// Creates 2 validator sets, one for each end of a hyperlane warp route
-function duplexValidatorSet(
-  chains: [string, string],
-  accountIds: string[],
-): ValidatorConfig[][] {
-  const sets = [];
-
-  for (const chain of chains) {
-    const builder = new ValidatorSetBuilder(chain);
-
-    for (const accountId of accountIds) {
-      builder.addAccount(accountId);
-    }
-
-    sets.push(builder.build());
-  }
-
-  return sets;
-}
-
+// This isn't fool proof, if we use multiple validator sets for the same chain
+// we could have duplicate/uniqueId collisions etc. But I'm not sure there will
+// ever be a need for multiple validator sets for the same chain so this should do for now.
 export const validatorSets: ValidatorConfig[][] = [
-  ...duplexValidatorSet(
-    ["sovstarter", "ethtest"],
-    [
-      "590183691025", // Ross (customer)
-      "455162986047", // Sovereign Testnet (core)
-      "189265240691", // Hyperlane Testnet (overflow)
-    ],
-  ),
+  new ValidatorSetBuilder("sovstarter")
+    .addAccount("590183691025") // Ross (customer)
+    .addAccount("455162986047") // Sovereign Testnet (core)
+    .addAccount("189265240691") // Hyperlane Testnet (overflow)
+    .build(),
+  new ValidatorSetBuilder("ethtest")
+    .addAccount("590183691025") // Ross (customer)
+    .addAccount("455162986047") // Sovereign Testnet (core)
+    .addAccount("189265240691") // Hyperlane Testnet (overflow)
+    .build(),
 ];
