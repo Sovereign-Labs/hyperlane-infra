@@ -9,7 +9,7 @@ export const relayerConfigs: RelayerConfig[] = [
     // Sovereign Testnet
     accountId: "455162986047",
     uniqueId: "relayer-testnet-1",
-    chains: ["sovstarter", "ethtest"],
+    chains: ["sepolia", "aledrynet"],
   },
 ];
 
