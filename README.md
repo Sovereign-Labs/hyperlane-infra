@@ -91,4 +91,5 @@ AWS_REGION=ap-southeast-2 AWS_PROFILE=455162986047_AdministratorAccess npm run d
 
 Unless there's a reason to do otherwise, wallet keys should only be deployed to the accounts running relayers, i.e `Sovereign Mainnet (744159939852)` and `Sovereign Testnet (455162986047)`.
 
-> Note: Ensure that you have downloaded wallet-secrets.json from 1Password and placed it in the `secrets/` directory before running the above command.
+> [!NOTE]
+> Ensure that you have downloaded wallet-secrets.json from 1Password and placed it in the `secrets/` directory before running the above command.
