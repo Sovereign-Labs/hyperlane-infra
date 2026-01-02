@@ -7,4 +7,4 @@ node_modules
 .cdk.staging
 cdk.out
 
-configs/wallet-secrets.json
+wallet-secrets.json
