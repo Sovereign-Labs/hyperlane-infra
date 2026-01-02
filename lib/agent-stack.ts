@@ -198,17 +198,7 @@ export class AgentStack extends cdk.Stack {
 
       if (validatorWalletAccess) {
         const chain = environment["HYP_ORIGINCHAINNAME"];
-        const envVar = `HYP_CHAINS_${chain.toUpperCase()}_SIGNER_KEY`;
-
-        // Grant access to wallet private keys stored in Secrets Manager
-        const secret = secretsmanager.Secret.fromSecretNameV2(
-          this,
-          `SignerKeySecret-${chain}`,
-          `hyperlane/${chain}/wallet`,
-        );
-
-        secret.grantRead(executionRole);
-        container.addSecret(envVar, ecs.Secret.fromSecretsManager(secret));
+        this.grantWalletAccess([chain], container);
       }
 
       // s3 bucket
@@ -222,18 +212,7 @@ export class AgentStack extends cdk.Stack {
     if (agentType === AgentType.Relayer) {
       // This env var should always exist for relayers
       const chains = environment["HYP_RELAYCHAINS"].split(",");
-
-      for (const chain of chains) {
-        const envVar = `HYP_CHAINS_${chain.toUpperCase()}_SIGNER_KEY`;
-        const secret = secretsmanager.Secret.fromSecretNameV2(
-          this,
-          `SignerKeySecret-${chain}`,
-          `hyperlane/${chain}/wallet`,
-        );
-
-        secret.grantRead(executionRole);
-        container.addSecret(envVar, ecs.Secret.fromSecretsManager(secret));
-      }
+      this.grantWalletAccess(chains, container);
     }
 
     this.service = new ecs.FargateService(this, "Service", {
@@ -278,6 +257,20 @@ export class AgentStack extends cdk.Stack {
         value: this.validatorKey.keyId,
         description: "KMS signing key ID for validator",
       });
+    }
+  }
+
+  grantWalletAccess(chains: string[], container: ecs.ContainerDefinition) {
+    for (const chain of chains) {
+      const envVar = `HYP_CHAINS_${chain.toUpperCase()}_SIGNER_KEY`;
+      const secret = secretsmanager.Secret.fromSecretNameV2(
+        this,
+        `SignerKeySecret-${chain}`,
+        `hyperlane/${chain}/wallet`,
+      );
+
+      secret.grantRead(container.taskDefinition.obtainExecutionRole());
+      container.addSecret(envVar, ecs.Secret.fromSecretsManager(secret));
     }
   }
 }
