@@ -81,7 +81,7 @@ This will perform deployments to all hyperlane related accounts, including our n
 
 ## Wallet Management
 
-Hyperlane uses AWS Secrets Manager to store private keys for our relayer wallets.
+We use AWS Secrets Manager to store private keys for our relayer wallets.
 
 Deploy wallet secrets to an account/region by running the following command:
 
