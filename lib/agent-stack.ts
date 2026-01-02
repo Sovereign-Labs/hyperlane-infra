@@ -42,6 +42,18 @@ export interface AgentStackProps extends cdk.StackProps {
   validatorKey?: kms.IAlias;
 
   /**
+   * Whether to grant the validator access to the wallet private keys. (only for Validator agents).
+   *
+   * Validators need access to funds to perform their "Validator Announcement" transaction.
+   * Long term, this should be done by us to avoid the validator having access to wallets for a once-off tx.
+   * For now, we grant access to the validator task role.
+   *
+   * Requires the wallet secret to exist in the account running the validator - typically we only deploy wallet secrets
+   * to the "core" accounts that are running relayers.
+   **/
+  validatorWalletAccess?: boolean;
+
+  /**
    * Environment variables for the agent container
    * Example (for relayer): { HYP_RELAYCHAINS: 'ethtest,sovstarter' }
    */
@@ -65,6 +77,7 @@ export class AgentStack extends cdk.Stack {
       repository,
       bucket,
       validatorKey,
+      validatorWalletAccess,
     } = props;
 
     const accessPoint = new efs.AccessPoint(this, "AccessPoint", {
@@ -137,27 +150,6 @@ export class AgentStack extends cdk.Stack {
       NO_COLOR: "1",
     };
 
-    if (agentType === AgentType.Validator) {
-      // We can't throw a error here because it causes the hyperlane app stack to fail
-      // to synth if we haven't created the validators key yet - which will be the case a lot of the time
-      // since they're in the same CDK app.
-      if (validatorKey) {
-        validatorKey.grantSignVerify(this.taskRole);
-        environment.HYP_VALIDATOR_TYPE = "aws";
-        environment.HYP_VALIDATOR_ID = validatorKey.aliasName;
-      } else {
-        Annotations.of(this).addWarningV2(
-          "sov:MissingValidatorKey",
-          "Deploying a validator without a key, agent will fail at runtime.",
-        );
-      }
-
-      // s3 bucket
-      environment.HYP_CHECKPOINTSYNCER_TYPE = "s3";
-      environment.HYP_CHECKPOINTSYNCER_BUCKET = bucket.bucketName;
-      environment.HYP_CHECKPOINTSYNCER_FOLDER = uniqueId;
-    }
-
     const containerConfig: ecs.ContainerDefinitionOptions = {
       image: ecs.ContainerImage.fromEcrRepository(repository),
       logging: ecs.LogDrivers.awsLogs({
@@ -188,6 +180,42 @@ export class AgentStack extends cdk.Stack {
       containerPath: dbPath,
       readOnly: false,
     });
+
+    if (agentType === AgentType.Validator) {
+      // We can't throw a error here because it causes the hyperlane app stack to fail
+      // to synth if we haven't created the validators key yet - which will be the case a lot of the time
+      // since they're in the same CDK app.
+      if (validatorKey) {
+        validatorKey.grantSignVerify(this.taskRole);
+        environment.HYP_VALIDATOR_TYPE = "aws";
+        environment.HYP_VALIDATOR_ID = validatorKey.aliasName;
+      } else {
+        Annotations.of(this).addWarningV2(
+          "sov:MissingValidatorKey",
+          "Deploying a validator without a key, agent will fail at runtime.",
+        );
+      }
+
+      if (validatorWalletAccess) {
+        const chain = environment["HYP_ORIGINCHAINNAME"];
+        const envVar = `HYP_CHAINS_${chain.toUpperCase()}_SIGNER_KEY`;
+
+        // Grant access to wallet private keys stored in Secrets Manager
+        const secret = secretsmanager.Secret.fromSecretNameV2(
+          this,
+          `SignerKeySecret-${chain}`,
+          `hyperlane/${chain}/wallet`,
+        );
+
+        secret.grantRead(executionRole);
+        container.addSecret(envVar, ecs.Secret.fromSecretsManager(secret));
+      }
+
+      // s3 bucket
+      environment.HYP_CHECKPOINTSYNCER_TYPE = "s3";
+      environment.HYP_CHECKPOINTSYNCER_BUCKET = bucket.bucketName;
+      environment.HYP_CHECKPOINTSYNCER_FOLDER = uniqueId;
+    }
 
     // Inject wallet signer keys from secrets manager
     // Only access the keys the relayer is relaying

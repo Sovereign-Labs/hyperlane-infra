@@ -111,6 +111,7 @@ function deployAgent(
     agentType: AgentType;
     environment: Record<string, string>;
     validatorKey?: kms.IAlias;
+    validatorWalletAccess?: boolean;
     extraTags?: Record<string, string>;
   },
 ) {
@@ -133,6 +134,7 @@ function deployAgent(
       repository: ecr.repository,
       bucket,
       validatorKey: config.validatorKey,
+      validatorWalletAccess: config.validatorWalletAccess,
       environment: config.environment,
     },
   );
@@ -204,6 +206,7 @@ for (const validatorSet of validatorSets) {
       accountId,
       agentType: AgentType.Validator,
       validatorKey,
+      validatorWalletAccess: true,
       environment: {
         HYP_ORIGINCHAINNAME: chain,
       },
