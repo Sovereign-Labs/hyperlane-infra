@@ -83,4 +83,12 @@ This will perform deployments to all hyperlane related accounts, including our n
 
 Hyperlane uses AWS Secrets Manager to store private keys for our relayer wallets.
 
-TODO: mention naming convention when saving wallet keys in secrets manager and key format
+Deploy wallet secrets to an account/region by running the following command:
+
+```sh
+AWS_REGION=ap-southeast-2 AWS_PROFILE=455162986047_AdministratorAccess npm run deploy-wallets:testnet
+```
+
+Unless there's a reason to do otherwise, wallet keys should only be deployed to the accounts running relayers, i.e `Sovereign Mainnet (744159939852)` and `Sovereign Testnet (455162986047)`.
+
+> Note: Ensure that you have downloaded wallet-secrets.json from 1Password and placed it in the `secrets/` directory before running the above command.

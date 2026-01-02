@@ -5,7 +5,7 @@ import {
   CreateSecretCommand,
   DescribeSecretCommand,
 } from "@aws-sdk/client-secrets-manager";
-import walletConfigs from "../configs/wallet-secrets.json";
+import walletConfigs from "../secrets/wallet-secrets.json";
 
 async function createSecret(
   client: SecretsManagerClient,
@@ -64,6 +64,8 @@ async function main() {
     );
     process.exit(1);
   }
+
+  console.log(`Deploying in AWS region: ${await client.config.region()}`);
 
   await deployWalletSecrets(client, network);
 }

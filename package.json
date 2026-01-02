@@ -5,7 +5,9 @@
     "build": "tsc",
     "watch": "tsc -w",
     "test": "jest",
-    "cdk": "cdk"
+    "cdk": "cdk",
+    "deploy-wallets:testnet": "ts-node scripts/create-wallet-secrets.ts testnet",
+    "deploy-wallets:mainnet": "ts-node scripts/create-wallet-secrets.ts mainnet"
   },
   "devDependencies": {
     "@types/jest": "^29.5.14",
