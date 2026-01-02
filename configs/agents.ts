@@ -9,7 +9,7 @@ export const relayerConfigs: RelayerConfig[] = [
     // Sovereign Testnet
     accountId: "455162986047",
     uniqueId: "relayer-testnet-1",
-    chains: ["sovstarter", "ethtest"],
+    chains: ["sepolia", "aledrynet"],
   },
 ];
 
@@ -59,12 +59,12 @@ class ValidatorSetBuilder {
 // we could have duplicate/uniqueId collisions etc. But I'm not sure there will
 // ever be a need for multiple validator sets for the same chain so this should do for now.
 export const validatorSets: ValidatorConfig[][] = [
-  new ValidatorSetBuilder("sovstarter")
+  new ValidatorSetBuilder("sepolia")
     .addAccount("590183691025") // Ross (customer)
     .addAccount("455162986047") // Sovereign Testnet (core)
     .addAccount("189265240691") // Hyperlane Testnet (overflow)
     .build(),
-  new ValidatorSetBuilder("ethtest")
+  new ValidatorSetBuilder("aledrynet")
     .addAccount("590183691025") // Ross (customer)
     .addAccount("455162986047") // Sovereign Testnet (core)
     .addAccount("189265240691") // Hyperlane Testnet (overflow)

@@ -8,6 +8,7 @@ import * as efs from "aws-cdk-lib/aws-efs";
 import * as ecr from "aws-cdk-lib/aws-ecr";
 import * as kms from "aws-cdk-lib/aws-kms";
 import * as secretsmanager from "aws-cdk-lib/aws-secretsmanager";
+import { Annotations } from "aws-cdk-lib/core";
 import { Construct } from "constructs";
 
 export enum AgentType {
@@ -137,13 +138,18 @@ export class AgentStack extends cdk.Stack {
     };
 
     if (agentType === AgentType.Validator) {
-      // If this is not passed the validator will fail at runtime
       // We can't throw a error here because it causes the hyperlane app stack to fail
-      // to synth if we haven't created the validators key yet
+      // to synth if we haven't created the validators key yet - which will be the case a lot of the time
+      // since they're in the same CDK app.
       if (validatorKey) {
         validatorKey.grantSignVerify(this.taskRole);
         environment.HYP_VALIDATOR_TYPE = "aws";
         environment.HYP_VALIDATOR_ID = validatorKey.aliasName;
+      } else {
+        Annotations.of(this).addWarningV2(
+          "sov:MissingValidatorKey",
+          "Deploying a validator without a key, agent will fail at runtime.",
+        );
       }
 
       // s3 bucket

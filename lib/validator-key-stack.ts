@@ -1,5 +1,6 @@
 import * as cdk from "aws-cdk-lib";
 import * as kms from "aws-cdk-lib/aws-kms";
+import { AgentType } from "./agent-stack";
 
 export type ValidatorKeyConfig = {
   /** Alias for the KMS key */
@@ -50,6 +51,7 @@ export class ValidatorKeyStack extends cdk.Stack {
       });
 
       cdk.Tags.of(key).add("Chain", chain);
+      cdk.Tags.of(key).add("Agent", AgentType.Validator);
       this.keys[alias] = keyAlias;
     }
   }
