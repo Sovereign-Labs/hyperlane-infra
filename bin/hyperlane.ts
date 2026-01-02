@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import * as cdk from "aws-cdk-lib/core";
+import * as kms from "aws-cdk-lib/aws-kms";
 import { BaseAccountStack } from "../lib/base-account-stack";
 import { AgentStack, AgentType } from "../lib/agent-stack";
 import { SignatureStack } from "../lib/signature-stack";
@@ -102,38 +103,59 @@ for (const account of HYPERLANE_ACCOUNTS) {
   baseStacks[account.id] = stack;
 }
 
-// Deploy relayers
-for (const relayer of relayerConfigs) {
-  const account = getAccountById(relayer.accountId);
-  const accountName = normalizeAccountName(account.name);
+function deployAgent(
+  app: cdk.App,
+  config: {
+    uniqueId: string;
+    accountId: string;
+    agentType: AgentType;
+    environment: Record<string, string>;
+    validatorKey?: kms.IAlias;
+    extraTags?: Record<string, string>;
+  },
+) {
+  const account = getAccountById(config.accountId);
   const network = getNetworkType(account);
-  const agentType = AgentType.Relayer;
-  const { cluster, fileSystem, efsSecurityGroup } = baseStacks[account.id];
+  const { cluster, fileSystem, efsSecurityGroup } =
+    baseStacks[config.accountId];
   const bucket = signatureBuckets[network].bucket;
 
   const stack = new AgentStack(
     app,
-    id(capitalize(agentType), network, accountName),
+    id(capitalize(config.agentType), network, config.uniqueId),
     {
-      env: {
-        account: account.id,
-        region,
-      },
-      uniqueId: relayer.uniqueId,
-      agentType,
+      env: { account: config.accountId, region },
+      uniqueId: config.uniqueId,
+      agentType: config.agentType,
       cluster,
       fileSystem,
       efsSecurityGroup,
       repository: ecr.repository,
       bucket,
-      environment: {
-        HYP_RELAYCHAINS: relayer.chains.join(","),
-      },
+      validatorKey: config.validatorKey,
+      environment: config.environment,
     },
   );
 
-  stack.addStackTag("Agent", agentType);
+  stack.addStackTag("Agent", config.agentType);
+  Object.entries(config.extraTags ?? {}).forEach(([k, v]) =>
+    stack.addStackTag(k, v),
+  );
   applyAccountTags(stack, account);
+
+  return stack;
+}
+
+// Deploy relayers
+for (const relayer of relayerConfigs) {
+  deployAgent(app, {
+    uniqueId: relayer.uniqueId,
+    accountId: relayer.accountId,
+    agentType: AgentType.Relayer,
+    environment: {
+      HYP_RELAYCHAINS: relayer.chains.join(","),
+    },
+  });
 }
 
 let validatorKeyStacks: { [accountId: string]: ValidatorKeyStack } = {};
@@ -176,35 +198,16 @@ for (const validatorSet of validatorSets) {
   for (const validator of validatorSet) {
     const { accountId, uniqueId, chain } = validator;
     const validatorKey = validatorKeyStacks[accountId]?.keys[uniqueId];
-    const account = getAccountById(accountId);
-    const network = getNetworkType(account);
-    const agentType = AgentType.Validator;
-    const { cluster, fileSystem, efsSecurityGroup } = baseStacks[account.id];
-    const bucket = signatureBuckets[network].bucket;
-    const stack = new AgentStack(
-      app,
-      id(capitalize(agentType), network, uniqueId),
-      {
-        env: {
-          account: accountId,
-          region,
-        },
-        uniqueId,
-        agentType,
-        cluster,
-        fileSystem,
-        efsSecurityGroup,
-        repository: ecr.repository,
-        bucket,
-        validatorKey,
-        environment: {
-          HYP_ORIGINCHAINNAME: chain,
-        },
-      },
-    );
 
-    stack.addStackTag("Agent", agentType);
-    stack.addStackTag("Chain", chain);
-    applyAccountTags(stack, account);
+    deployAgent(app, {
+      uniqueId,
+      accountId,
+      agentType: AgentType.Validator,
+      validatorKey,
+      environment: {
+        HYP_ORIGINCHAINNAME: chain,
+      },
+      extraTags: { Chain: chain },
+    });
   }
 }
